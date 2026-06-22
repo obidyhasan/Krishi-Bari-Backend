@@ -475,8 +475,12 @@ const generateInvoice = (order: any): Promise<Buffer> => {
       doc.fillColor(COLORS.text).font("Helvetica");
       order.items.forEach((item: any, i: number) => {
         const itemTotal = item.price * item.quantity;
+        // Show stored variant snapshot (immutable even if variant is later changed/deleted)
+        const variantLabel = item.variantValue
+          ? ` — ${item.variantName ? item.variantName + ": " : ""}${item.variantValue}`
+          : "";
         if (i % 2 === 0) { doc.rect(50, currentY - 5, 500, 20).fill("#fcfcfc"); doc.fillColor(COLORS.text); }
-        doc.text(item.name, 70, currentY, { width: 220 });
+        doc.text(`${item.name}${variantLabel}`, 70, currentY, { width: 220 });
         doc.text(`Tk. ${item.price.toFixed(2)}`, 300, currentY, { width: 60, align: "right" });
         doc.text(item.quantity.toString(), 370, currentY, { width: 40, align: "right" });
         doc.text(`Tk. ${itemTotal.toFixed(2)}`, 450, currentY, { width: 80, align: "right" });

@@ -21,7 +21,7 @@ const auth = (...requiredRoles: UserRole[]) => {
     try {
       decoded = jwtHelper.verifyToken(
         token,
-        config.jwt.access_secret
+        config.jwt.access_secret,
       ) as IJwtPayload;
     } catch {
       throw new ApiError(httpStatus.UNAUTHORIZED, "Invalid or expired token!");
@@ -32,12 +32,40 @@ const auth = (...requiredRoles: UserRole[]) => {
     if (requiredRoles.length && !requiredRoles.includes(decoded.role)) {
       throw new ApiError(
         httpStatus.FORBIDDEN,
-        "You do not have permission to access this resource!"
+        "You do not have permission to access this resource!",
       );
     }
 
     next();
   });
 };
+
+export const optionalAuth = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      next();
+      return;
+    }
+
+    if (!authHeader.startsWith("Bearer ")) {
+      throw new ApiError(
+        httpStatus.UNAUTHORIZED,
+        "Invalid authorization header!",
+      );
+    }
+
+    try {
+      req.user = jwtHelper.verifyToken(
+        authHeader.split(" ")[1],
+        config.jwt.access_secret,
+      ) as IJwtPayload;
+    } catch {
+      throw new ApiError(httpStatus.UNAUTHORIZED, "Invalid or expired token!");
+    }
+
+    next();
+  },
+);
 
 export default auth;

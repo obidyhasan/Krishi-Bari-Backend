@@ -1,8 +1,16 @@
 import fs from "fs";
 import path from "path";
+import crypto from "crypto";
+import bcrypt from "bcrypt";
 import httpStatus from "http-status";
-import { OrderStatus, PaymentMethod, ProductStatus } from "@prisma/client";
+import {
+  OrderStatus,
+  PaymentMethod,
+  ProductStatus,
+  UserRole,
+} from "@prisma/client";
 import { Server as SocketServer } from "socket.io";
+import config from "../../config";
 import { prisma } from "../../shared/prisma";
 import ApiError from "../../errors/ApiError";
 import { paginationHelper, IOptions } from "../../helper/paginationHelper";
@@ -10,44 +18,236 @@ import { orderHelper } from "../../helper/orderHelper";
 import { emailHelper } from "../../helper/emailHelper";
 import { smsHelper } from "../../helper/smsHelper";
 import { pdfHelper } from "../../helper/pdfHelper";
+import { jwtHelper } from "../../helper/jwtHelper";
 import { purchaseEventId } from "../tracking/hashing";
 import { queuePurchaseEventByOrderId } from "../tracking/tracking.service";
 
 const COD_MAX_AMOUNT = Number(process.env.COD_MAX_AMOUNT) || 5000;
 
-const createOrder = async (
-  userId: string,
-  payload: {
-    addressId: string;
-    note?: string;
-    couponCode?: string;
-    deliverySlot?: string;
-    paymentMethod: string;
-  },
+type CheckoutItem = {
+  productId: string;
+  quantity: number;
+  variantId?: string | null;
+};
+type CheckoutPayload = {
+  addressId?: string;
+  guest?: {
+    name: string;
+    phone: string;
+    email: string;
+    address: string;
+  };
+  cartItems?: CheckoutItem[];
+  note?: string;
+  couponCode?: string;
+  deliverySlot?: string;
+  paymentMethod: string;
+};
+
+const normalizeEmail = (email: string) => email.trim().toLowerCase();
+
+const issueAuthTokens = async (user: {
+  id: string;
+  email: string;
+  role: UserRole;
+  name: string;
+  avatar?: string | null;
+  isEmailVerified: boolean;
+}) => {
+  const accessToken = jwtHelper.generateToken(
+    { userId: user.id, email: user.email, role: user.role },
+    config.jwt.access_secret,
+    config.jwt.access_expires_in,
+  );
+  const refreshToken = jwtHelper.generateToken(
+    { userId: user.id, email: user.email, role: user.role },
+    config.jwt.refresh_secret,
+    config.jwt.refresh_expires_in,
+  );
+
+  await prisma.user.update({ where: { id: user.id }, data: { refreshToken } });
+
+  return {
+    accessToken,
+    refreshToken,
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      avatar: user.avatar,
+      isEmailVerified: user.isEmailVerified,
+    },
+  };
+};
+
+const ensureCheckoutUser = async (
+  userId: string | undefined,
+  payload: CheckoutPayload,
 ) => {
-  // Validate address
-  const address = await prisma.address.findFirst({
-    where: { id: payload.addressId, userId },
+  if (userId) {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new ApiError(httpStatus.NOT_FOUND, "User not found.");
+    return {
+      user,
+      auth: undefined as
+        | Awaited<ReturnType<typeof issueAuthTokens>>
+        | undefined,
+    };
+  }
+
+  if (!payload.guest) {
+    throw new ApiError(
+      httpStatus.BAD_REQUEST,
+      "Guest checkout details are required.",
+    );
+  }
+
+  const email = normalizeEmail(payload.guest.email);
+  let user = await prisma.user.findUnique({ where: { email } });
+  let isNewUser = false;
+
+  if (!user) {
+    if (payload.guest.phone) {
+      const existingPhone = await prisma.user.findUnique({
+        where: { phone: payload.guest.phone },
+      });
+      if (existingPhone)
+        throw new ApiError(httpStatus.CONFLICT, "Phone is already registered.");
+    }
+
+    const generatedPassword = crypto.randomBytes(32).toString("base64url");
+    user = await prisma.user.create({
+      data: {
+        name: payload.guest.name.trim(),
+        email,
+        phone: payload.guest.phone.trim(),
+        password: await bcrypt.hash(
+          generatedPassword,
+          config.bcrypt_salt_rounds,
+        ),
+        role: UserRole.CUSTOMER,
+      },
+    });
+    isNewUser = true;
+  }
+
+  if (user.status === "BANNED" || user.status === "INACTIVE") {
+    throw new ApiError(
+      httpStatus.FORBIDDEN,
+      "This account cannot place orders.",
+    );
+  }
+
+  return { 
+    user, 
+    auth: isNewUser ? await issueAuthTokens(user) : undefined 
+  };
+};
+
+const createCheckoutAddress = async (
+  userId: string,
+  payload: CheckoutPayload,
+) => {
+  if (payload.addressId) {
+    const address = await prisma.address.findFirst({
+      where: { id: payload.addressId, userId },
+    });
+    if (!address)
+      throw new ApiError(httpStatus.NOT_FOUND, "Address not found.");
+    return address.id;
+  }
+
+  if (!payload.guest) {
+    throw new ApiError(httpStatus.BAD_REQUEST, "Delivery address is required.");
+  }
+
+  const [division, district, upazila] = await Promise.all([
+    prisma.division.findFirst({ orderBy: { createdAt: "asc" } }),
+    prisma.district.findFirst({ orderBy: { createdAt: "asc" } }),
+    prisma.upazila.findFirst({ orderBy: { createdAt: "asc" } }),
+  ]);
+  if (!division || !district || !upazila) {
+    throw new ApiError(
+      httpStatus.BAD_REQUEST,
+      "Delivery area data is not configured.",
+    );
+  }
+
+  const address = await prisma.address.create({
+    data: {
+      userId,
+      label: "Checkout",
+      fullName: payload.guest.name.trim(),
+      phone: payload.guest.phone.trim(),
+      line1: payload.guest.address.trim(),
+      divisionId: division.id,
+      districtId: district.id,
+      upazilaId: upazila.id,
+      postalCode: "0000",
+      isDefault: false,
+    },
   });
-  if (!address) throw new ApiError(httpStatus.NOT_FOUND, "Address not found.");
+  return address.id;
+};
 
-  // Get user
-  const userData = await prisma.user.findUnique({ where: { id: userId } });
-  if (!userData) throw new ApiError(httpStatus.NOT_FOUND, "User not found.");
+const syncCheckoutCart = async (userId: string, items?: CheckoutItem[]) => {
+  if (!items?.length) return;
+  const normalized = items.slice(0, 50).map((item) => ({
+    productId: item.productId,
+    variantId: item.variantId ?? null,
+    quantity: Math.max(1, Math.floor(item.quantity)),
+  }));
 
-  // Get cart
+  await prisma.$transaction(async (tx) => {
+    const cart = await tx.cart.upsert({
+      where: { userId },
+      create: { userId },
+      update: {},
+    });
+    await tx.cartItem.deleteMany({ where: { cartId: cart.id } });
+    const unique = new Map<string, (typeof normalized)[0]>();
+    for (const item of normalized)
+      unique.set(`${item.productId}:${item.variantId ?? ""}`, item);
+    await tx.cartItem.createMany({
+      data: Array.from(unique.values()).map((item) => ({
+        ...item,
+        cartId: cart.id,
+      })),
+      skipDuplicates: true,
+    });
+  });
+};
+
+const createOrder = async (
+  userId: string | undefined,
+  payload: CheckoutPayload,
+) => {
+  const { user: userData, auth } = await ensureCheckoutUser(userId, payload);
+  const effectiveUserId = userData.id;
+  const addressId = await createCheckoutAddress(effectiveUserId, payload);
+  await syncCheckoutCart(effectiveUserId, payload.cartItems);
+
+  // Get cart (include variant to read variant-specific price & SKU)
   const cart = await prisma.cart.findUnique({
-    where: { userId },
-    include: { items: { include: { product: true } } },
+    where: { userId: effectiveUserId },
+    include: {
+      items: {
+        include: {
+          product: true,
+          variant: true,
+        },
+      },
+    },
   });
   if (!cart || cart.items.length === 0)
     throw new ApiError(httpStatus.BAD_REQUEST, "Your cart is empty.");
 
   // Stock validation will be done inside transaction
 
-  // Calculate totals
+  // Calculate totals — use variant price when available
   let subtotal = cart.items.reduce((sum, item) => {
-    const price = item.product.salePrice ?? item.product.price;
+    const price = item.variant?.price ?? item.product.salePrice ?? item.product.price;
     return sum + price * item.quantity;
   }, 0);
 
@@ -71,7 +271,9 @@ const createOrder = async (
       );
 
     const prevUsage = await prisma.couponUsage.findUnique({
-      where: { couponId_userId: { couponId: coupon.id, userId } },
+      where: {
+        couponId_userId: { couponId: coupon.id, userId: effectiveUserId },
+      },
     });
     if (prevUsage)
       throw new ApiError(
@@ -105,10 +307,17 @@ const createOrder = async (
   // Create order in transaction
   const order = await prisma.$transaction(
     async (tx) => {
-      // Fetch latest cart with product stock inside transaction
+      // Fetch latest cart with product + variant stock inside transaction
       const latestCart = await tx.cart.findUnique({
-        where: { userId },
-        include: { items: { include: { product: true } } },
+        where: { userId: effectiveUserId },
+        include: {
+          items: {
+            include: {
+              product: true,
+              variant: true,
+            },
+          },
+        },
       });
       if (!latestCart || latestCart.items.length === 0) {
         throw new ApiError(httpStatus.BAD_REQUEST, "Your cart is empty.");
@@ -122,10 +331,12 @@ const createOrder = async (
             `${item.product.name} is no longer available.`,
           );
         }
-        if (item.product.stock < item.quantity) {
+        // Validate variant stock if variant exists, otherwise base product stock
+        const availableStock = item.variant ? item.variant.stock : item.product.stock;
+        if (availableStock < item.quantity) {
           throw new ApiError(
             httpStatus.BAD_REQUEST,
-            `Insufficient stock for ${item.product.name}.`,
+            `Insufficient stock for ${item.product.name}${item.variant ? ` (${item.variant.value})` : ""}.`,
           );
         }
       }
@@ -133,9 +344,9 @@ const createOrder = async (
       // Use latest cart items for order creation
       const cart = latestCart;
 
-      // Recalculate totals based on latest cart to ensure consistency
+      // Recalculate totals based on latest cart — use variant price when available
       const subtotal = cart.items.reduce((sum, item) => {
-        const price = item.product.salePrice ?? item.product.price;
+        const price = item.variant?.price ?? item.product.salePrice ?? item.product.price;
         return sum + price * item.quantity;
       }, 0);
 
@@ -172,7 +383,9 @@ const createOrder = async (
         }
 
         const prevUsage = await tx.couponUsage.findUnique({
-          where: { couponId_userId: { couponId: coupon.id, userId } },
+          where: {
+            couponId_userId: { couponId: coupon.id, userId: effectiveUserId },
+          },
         });
         if (prevUsage) {
           throw new ApiError(
@@ -208,8 +421,8 @@ const createOrder = async (
       const newOrder = await tx.order.create({
         data: {
           orderNumber: orderHelper.generateOrderNumber(),
-          userId,
-          addressId: payload.addressId,
+          userId: effectiveUserId,
+          addressId,
           notes: payload.note,
           deliverySlot: payload.deliverySlot,
           subtotal,
@@ -221,9 +434,17 @@ const createOrder = async (
           items: {
             create: cart.items.map((item) => ({
               productId: item.productId,
+              variantId: item.variantId ?? null,
               quantity: item.quantity,
-              price: item.product.salePrice ?? item.product.price,
+              // Snapshot: use variant price if available, else sale/regular price
+              price: item.variant?.price ?? item.product.salePrice ?? item.product.price,
               name: item.product.name,
+              // Snapshot image from the first product image
+              imageUrl: (item.product as any).images?.[0]?.url ?? null,
+              // Variant snapshot — immutable record even if variant is later deleted
+              variantName: item.variant?.name ?? null,
+              variantValue: item.variant?.value ?? null,
+              variantSku: item.variant?.sku ?? null,
             })),
           },
           payment: {
@@ -251,7 +472,7 @@ const createOrder = async (
       // In-app notification: order placed
       await tx.notification.create({
         data: {
-          userId,
+          userId: effectiveUserId,
           title: "Order placed",
           message: `Your order #${newOrder.orderNumber} has been placed successfully.`,
           type: "ORDER",
@@ -270,16 +491,32 @@ const createOrder = async (
 
       // Deduct stock and check for low stock alert
       for (const item of cart.items) {
-        const stockUpdate = await tx.product.updateMany({
-          where: { id: item.productId, stock: { gte: item.quantity } },
-          data: { stock: { decrement: item.quantity } },
-        });
-        if (stockUpdate.count !== 1) {
-          throw new ApiError(
-            httpStatus.CONFLICT,
-            `Insufficient stock for ${item.product.name}.`,
-          );
+        if (item.variantId && item.variant) {
+          // Decrement variant-specific stock
+          const variantStockUpdate = await tx.productVariant.updateMany({
+            where: { id: item.variantId, stock: { gte: item.quantity } },
+            data: { stock: { decrement: item.quantity } },
+          });
+          if (variantStockUpdate.count !== 1) {
+            throw new ApiError(
+              httpStatus.CONFLICT,
+              `Insufficient stock for ${item.product.name} (${item.variant.value}).`,
+            );
+          }
+        } else {
+          // Decrement base product stock
+          const stockUpdate = await tx.product.updateMany({
+            where: { id: item.productId, stock: { gte: item.quantity } },
+            data: { stock: { decrement: item.quantity } },
+          });
+          if (stockUpdate.count !== 1) {
+            throw new ApiError(
+              httpStatus.CONFLICT,
+              `Insufficient stock for ${item.product.name}.`,
+            );
+          }
         }
+
         const updatedProduct = await tx.product.findUniqueOrThrow({
           where: { id: item.productId },
         });
@@ -308,7 +545,9 @@ const createOrder = async (
           where: { id: couponId },
           data: { usedCount: { increment: 1 } },
         });
-        await tx.couponUsage.create({ data: { couponId, userId } });
+        await tx.couponUsage.create({
+          data: { couponId, userId: effectiveUserId },
+        });
       }
 
       // Clear cart
@@ -351,6 +590,7 @@ const createOrder = async (
   return {
     ...order,
     purchaseEventId: purchaseTrackingId,
+    auth,
   };
 };
 
@@ -368,6 +608,7 @@ const getMyOrders = async (userId: string, options: IOptions) => {
             product: {
               include: { images: { where: { isPrimary: true }, take: 1 } },
             },
+            variant: true,
           },
         },
         payment: true,
@@ -387,6 +628,7 @@ const getOrderById = async (orderId: string, userId: string) => {
           product: {
             include: { images: { where: { isPrimary: true }, take: 1 } },
           },
+          variant: true,
         },
       },
       payment: true,
@@ -504,6 +746,7 @@ const getAdminOrderById = async (orderId: string) => {
           product: {
             include: { images: { where: { isPrimary: true }, take: 1 } },
           },
+          variant: true,
         },
       },
       payment: true,
@@ -636,7 +879,7 @@ const updateOrderStatus = async (
 const reorder = async (orderId: string, userId: string) => {
   const order = await prisma.order.findFirst({
     where: { id: orderId, userId },
-    include: { items: { include: { product: true } } },
+    include: { items: true },
   });
   if (!order) throw new ApiError(httpStatus.NOT_FOUND, "Order not found.");
 
@@ -653,12 +896,14 @@ const reorder = async (orderId: string, userId: string) => {
           cartId_productId_variantId: {
             cartId: cart.id,
             productId: item.productId,
-            variantId: null as any,
+            // Restore the original variant — null is valid for non-variant items
+            variantId: (item.variantId ?? null) as string,
           },
         },
         create: {
           cartId: cart.id,
           productId: item.productId,
+          variantId: item.variantId ?? null,
           quantity: item.quantity,
         },
         update: { quantity: { increment: item.quantity } },
@@ -682,6 +927,7 @@ const generatePackingSlip = async (orderId: string) => {
               images: { where: { isPrimary: true }, take: 1 },
             },
           },
+          variant: true,
         },
       },
       payment: true,
@@ -923,19 +1169,19 @@ const generatePackingSlip = async (orderId: string) => {
             <tbody>
               ${order.items
                 .map((i) => {
-                  const product = (i as any).product;
-                  const weight = product.weight
-                    ? `${product.weight}${product.unit}`
-                    : product.unit;
-                  const img = product.images?.[0]?.url || "";
+                  // Use snapshot SKU: prefer variant SKU, then fall back to live product SKU
+                  const skuDisplay = (i as any).variantSku || (i as any).product?.sku || "N/A";
+                  // Use snapshot variant label for packers to identify correct variant
+                  const variantMeta = (i as any).variantValue
+                    ? `${(i as any).variantName ? (i as any).variantName + ": " : ""}${(i as any).variantValue}`
+                    : null;
                   return `
                   <tr>
                     <td>
                       <div class="prod-info">
-                       
                         <div class="prod-details">
                           <p class="p-name">${i.name}</p>
-                          <p class="p-meta">Unit: ${weight} | SKU: ${product.sku}</p>
+                          <p class="p-meta">${variantMeta ? `Variant: ${variantMeta} | ` : ""}SKU: ${skuDisplay}</p>
                         </div>
                       </div>
                     </td>
@@ -998,7 +1244,9 @@ const getInvoice = async (orderId: string, userId?: string) => {
     include: {
       user: { select: { name: true, email: true, phone: true } },
       address: { include: { division: true, district: true, upazila: true } },
-      items: true,
+      items: {
+        include: { variant: true },
+      },
     },
   });
   if (!order) throw new ApiError(httpStatus.NOT_FOUND, "Order not found.");

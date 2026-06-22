@@ -302,14 +302,17 @@ model AuditLog {
 }
 
 model OrderItem {
-  id        String  @id @default(uuid())
-  orderId   String
-  productId String
-  variantId String?
-  quantity  Int
-  price     Float // Snapshot price at time of order
-  name      String // Snapshot product name
-  imageUrl  String? // Snapshot product image
+  id           String  @id @default(uuid())
+  orderId      String
+  productId    String
+  variantId    String?
+  quantity     Int
+  price        Float   // Snapshot price at time of order
+  name         String  // Snapshot product name
+  imageUrl     String? // Snapshot product image
+  variantName  String? // Snapshot: e.g., "Weight"
+  variantValue String? // Snapshot: e.g., "10 KG"
+  variantSku   String? // Snapshot: variant SKU at time of order
 
   order   Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
   product Product         @relation(fields: [productId], references: [id])
@@ -317,6 +320,7 @@ model OrderItem {
 
   @@map("order_items")
 }
+
 
 model OrderTracking {
   id      String      @id @default(uuid())

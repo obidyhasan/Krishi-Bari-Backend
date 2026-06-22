@@ -26,7 +26,7 @@ const redisKeys = {
 const recordFailedLoginAttempt = async (email: string) => {
   const count = await redisGuards.incrementWithinWindow(
     redisKeys.loginFail(email),
-    LOGIN_LOCKOUT_MS
+    LOGIN_LOCKOUT_MS,
   );
   if (count && count >= MAX_LOGIN_ATTEMPTS) {
     await redisGuards.lockFor(redisKeys.loginLock(email), LOGIN_LOCKOUT_MS);
@@ -34,18 +34,21 @@ const recordFailedLoginAttempt = async (email: string) => {
 };
 
 const clearLoginAttempts = async (email: string) => {
-  await redisGuards.del([redisKeys.loginFail(email), redisKeys.loginLock(email)]);
+  await redisGuards.del([
+    redisKeys.loginFail(email),
+    redisKeys.loginLock(email),
+  ]);
 };
 
 const trackOtpResend = async (identifier: string) => {
   const count = await redisGuards.incrementWithinWindow(
     redisKeys.otpResend(identifier),
-    OTP_RESEND_WINDOW_MS
+    OTP_RESEND_WINDOW_MS,
   );
   if (count && count > MAX_OTP_RESENDS) {
     throw new ApiError(
       httpStatus.TOO_MANY_REQUESTS,
-      "OTP resend limit reached. Please try again after 10 minutes."
+      "OTP resend limit reached. Please try again after 10 minutes.",
     );
   }
 };
@@ -53,7 +56,7 @@ const trackOtpResend = async (identifier: string) => {
 const trackFailedOtpAttempt = async (identifier: string) => {
   const count = await redisGuards.incrementWithinWindow(
     redisKeys.otpFail(identifier),
-    LOGIN_LOCKOUT_MS
+    LOGIN_LOCKOUT_MS,
   );
   if (count && count >= MAX_OTP_VERIFY_ATTEMPTS) {
     await redisGuards.lockFor(redisKeys.otpLock(identifier), LOGIN_LOCKOUT_MS);
@@ -61,13 +64,16 @@ const trackFailedOtpAttempt = async (identifier: string) => {
 };
 
 const clearOtpAttempts = async (identifier: string) => {
-  await redisGuards.del([redisKeys.otpFail(identifier), redisKeys.otpLock(identifier)]);
+  await redisGuards.del([
+    redisKeys.otpFail(identifier),
+    redisKeys.otpLock(identifier),
+  ]);
 };
 
 const authenticateCredentials = async (email: string, password: string) => {
   await redisGuards.assertNotLocked(
     redisKeys.loginLock(email),
-    "Too many failed login attempts. Please try again in 15 minutes."
+    "Too many failed login attempts. Please try again in 15 minutes.",
   );
 
   const user = await prisma.user.findUnique({ where: { email } });
@@ -82,14 +88,7 @@ const authenticateCredentials = async (email: string, password: string) => {
   if (user.status === UserStatus.INACTIVE) {
     throw new ApiError(
       httpStatus.FORBIDDEN,
-      "Your account is inactive. Please contact support."
-    );
-  }
-
-  if (user.role === "CUSTOMER" && !user.isEmailVerified) {
-    throw new ApiError(
-      httpStatus.FORBIDDEN,
-      "Please verify your email before logging in."
+      "Your account is inactive. Please contact support.",
     );
   }
 
@@ -127,7 +126,10 @@ const register = async (payload: {
     }
   }
 
-  const hashedPassword = await bcrypt.hash(payload.password, config.bcrypt_salt_rounds);
+  const hashedPassword = await bcrypt.hash(
+    payload.password,
+    config.bcrypt_salt_rounds,
+  );
   const userSelect = {
     id: true,
     name: true,
@@ -140,23 +142,23 @@ const register = async (payload: {
 
   const user = existing
     ? await prisma.user.update({
-      where: { id: existing.id },
-      data: {
-        name: payload.name,
-        password: hashedPassword,
-        phone: payload.phone,
-      },
-      select: userSelect,
-    })
+        where: { id: existing.id },
+        data: {
+          name: payload.name,
+          password: hashedPassword,
+          phone: payload.phone,
+        },
+        select: userSelect,
+      })
     : await prisma.user.create({
-      data: {
-        name: payload.name,
-        email: payload.email,
-        password: hashedPassword,
-        phone: payload.phone,
-      },
-      select: userSelect,
-    });
+        data: {
+          name: payload.name,
+          email: payload.email,
+          password: hashedPassword,
+          phone: payload.phone,
+        },
+        select: userSelect,
+      });
 
   // Send OTP
   const otp = await otpHelper.saveOtp(payload.email, "verify");
@@ -178,12 +180,11 @@ const verifyEmail = async (email: string, otp: string) => {
   const identifier = `verify:${email}`;
   await redisGuards.assertNotLocked(
     redisKeys.otpLock(identifier),
-    "Too many OTP attempts. Try again later."
+    "Too many OTP attempts. Try again later.",
   );
 
   const isValid = await otpHelper.verifyOtp(otp, email, "verify");
-  if (!isValid)
-  {
+  if (!isValid) {
     await trackFailedOtpAttempt(identifier);
     throw new ApiError(httpStatus.BAD_REQUEST, "Invalid or expired OTP.");
   }
@@ -198,18 +199,22 @@ const verifyEmail = async (email: string, otp: string) => {
   return { message: "Email verified successfully." };
 };
 
-const login = async (email: string, password: string, rememberMe: boolean = false) => {
+const login = async (
+  email: string,
+  password: string,
+  rememberMe: boolean = false,
+) => {
   const user = await authenticateCredentials(email, password);
   const accessToken = jwtHelper.generateToken(
     { userId: user.id, email: user.email, role: user.role },
     config.jwt.access_secret,
-    config.jwt.access_expires_in
+    config.jwt.access_expires_in,
   );
 
   const refreshToken = jwtHelper.generateToken(
     { userId: user.id, email: user.email, role: user.role },
     config.jwt.refresh_secret,
-    rememberMe ? "30d" : "7d"
+    rememberMe ? "30d" : "7d",
   );
 
   await prisma.user.update({
@@ -236,7 +241,10 @@ const refreshToken = async (token: string) => {
   try {
     decoded = jwtHelper.verifyToken(token, config.jwt.refresh_secret);
   } catch {
-    throw new ApiError(httpStatus.UNAUTHORIZED, "Invalid or expired refresh token.");
+    throw new ApiError(
+      httpStatus.UNAUTHORIZED,
+      "Invalid or expired refresh token.",
+    );
   }
 
   const user = await prisma.user.findUnique({
@@ -250,13 +258,13 @@ const refreshToken = async (token: string) => {
   const accessToken = jwtHelper.generateToken(
     { userId: user.id, email: user.email, role: user.role },
     config.jwt.access_secret,
-    config.jwt.access_expires_in
+    config.jwt.access_expires_in,
   );
 
   const newRefreshToken = jwtHelper.generateToken(
     { userId: user.id, email: user.email, role: user.role },
     config.jwt.refresh_secret,
-    config.jwt.refresh_expires_in
+    config.jwt.refresh_expires_in,
   );
 
   await prisma.user.update({
@@ -281,7 +289,7 @@ const createSocketToken = async (userId: string) => {
   const token = jwtHelper.generateToken(
     { userId: user.id, email: user.email, role: user.role, typ: "socket" },
     config.jwt.access_secret,
-    "60s"
+    "60s",
   );
   return { token, expiresInSeconds: 60 };
 };
@@ -304,26 +312,28 @@ const forgotPassword = async (email: string) => {
 const resetPassword = async (
   email: string,
   otp: string,
-  newPassword: string
+  newPassword: string,
 ) => {
   const user = await prisma.user.findUnique({ where: { email } });
   if (!user) throw new ApiError(httpStatus.NOT_FOUND, "User not found.");
 
   await redisGuards.assertNotLocked(
     redisKeys.otpLock(`reset:${email}`),
-    "Too many OTP attempts. Try again later."
+    "Too many OTP attempts. Try again later.",
   );
 
   const isValid = await otpHelper.verifyOtp(otp, email, "reset");
-  if (!isValid)
-  {
+  if (!isValid) {
     await trackFailedOtpAttempt(`reset:${email}`);
     throw new ApiError(httpStatus.BAD_REQUEST, "Invalid or expired OTP.");
   }
 
   await clearOtpAttempts(`reset:${email}`);
 
-  const hashedPassword = await bcrypt.hash(newPassword, config.bcrypt_salt_rounds);
+  const hashedPassword = await bcrypt.hash(
+    newPassword,
+    config.bcrypt_salt_rounds,
+  );
   await prisma.user.update({
     where: { email },
     data: { password: hashedPassword, refreshToken: null },
@@ -335,7 +345,7 @@ const resetPassword = async (
 const changePassword = async (
   userId: string,
   oldPassword: string,
-  newPassword: string
+  newPassword: string,
 ) => {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) throw new ApiError(httpStatus.NOT_FOUND, "User not found.");
@@ -400,7 +410,7 @@ const verifyOtp = async (email: string, otp: string) => {
 
   await redisGuards.assertNotLocked(
     redisKeys.otpLock(`verify:${email}`),
-    "Too many OTP attempts. Try again later."
+    "Too many OTP attempts. Try again later.",
   );
 
   const isValid = await otpHelper.verifyOtp(otp, email, "verify");
@@ -433,7 +443,7 @@ const adminLogin = async (email: string, password: string) => {
   const twoFactorToken = jwtHelper.generateToken(
     { email: user.email, role: user.role, purpose: "ADMIN_2FA" },
     config.jwt.access_secret,
-    "10m"
+    "10m",
   );
 
   return {
@@ -453,23 +463,31 @@ const verifyAdminTwoFactor = async (twoFactorToken: string, otp: string) => {
   try {
     decoded = jwtHelper.verifyToken(
       twoFactorToken,
-      config.jwt.access_secret
+      config.jwt.access_secret,
     ) as { email?: string; role?: string; purpose?: string };
   } catch {
-    throw new ApiError(httpStatus.UNAUTHORIZED, "Invalid or expired two-factor token.");
+    throw new ApiError(
+      httpStatus.UNAUTHORIZED,
+      "Invalid or expired two-factor token.",
+    );
   }
 
   if (decoded.purpose !== "ADMIN_2FA" || !decoded.email) {
-    throw new ApiError(httpStatus.UNAUTHORIZED, "Invalid two-factor token payload.");
+    throw new ApiError(
+      httpStatus.UNAUTHORIZED,
+      "Invalid two-factor token payload.",
+    );
   }
 
   const identifier = `admin2fa:${decoded.email}`;
   await redisGuards.assertNotLocked(
     redisKeys.otpLock(identifier),
-    "Too many OTP attempts. Try again later."
+    "Too many OTP attempts. Try again later.",
   );
 
-  const user = await prisma.user.findUnique({ where: { email: decoded.email } });
+  const user = await prisma.user.findUnique({
+    where: { email: decoded.email },
+  });
   if (!user || (user.role !== "ADMIN" && user.role !== "SUPER_ADMIN")) {
     throw new ApiError(httpStatus.FORBIDDEN, "Admin access required.");
   }
@@ -484,12 +502,12 @@ const verifyAdminTwoFactor = async (twoFactorToken: string, otp: string) => {
   const accessToken = jwtHelper.generateToken(
     { userId: user.id, email: user.email, role: user.role },
     config.jwt.access_secret,
-    config.jwt.access_expires_in
+    config.jwt.access_expires_in,
   );
   const refreshToken = jwtHelper.generateToken(
     { userId: user.id, email: user.email, role: user.role },
     config.jwt.refresh_secret,
-    config.jwt.refresh_expires_in
+    config.jwt.refresh_expires_in,
   );
 
   await prisma.user.update({

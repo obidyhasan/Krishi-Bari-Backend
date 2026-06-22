@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { UserRole } from "@prisma/client";
-import auth from "../../middlewares/auth";
+import auth, { optionalAuth } from "../../middlewares/auth";
 import ipAllowlist from "../../middlewares/ipAllowlist";
 import validateRequest from "../../middlewares/validateRequest";
 import { OrderController } from "./order.controller";
@@ -10,7 +10,7 @@ const router = Router();
 const CUSTOMER = auth(UserRole.CUSTOMER, UserRole.ADMIN, UserRole.SUPER_ADMIN);
 const ADMIN = auth(UserRole.ADMIN, UserRole.SUPER_ADMIN);
 
-router.post("/", CUSTOMER, validateRequest(OrderValidation.createOrder), OrderController.createOrder);
+router.post("/", optionalAuth, validateRequest(OrderValidation.createOrder), OrderController.createOrder);
 router.get("/", CUSTOMER, OrderController.getMyOrders);
 router.get("/admin", ipAllowlist, ADMIN, OrderController.getAllOrders);
 router.get("/admin/:id", ipAllowlist, ADMIN, OrderController.getAdminOrderById);
