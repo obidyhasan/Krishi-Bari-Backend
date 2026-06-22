@@ -1,0 +1,59 @@
+export const USER_ROLE = {
+  CUSTOMER: "CUSTOMER",
+  ADMIN: "ADMIN",
+  SUPER_ADMIN: "SUPER_ADMIN",
+} as const;
+
+export const USER_STATUS = {
+  ACTIVE: "ACTIVE",
+  INACTIVE: "INACTIVE",
+  BANNED: "BANNED",
+} as const;
+
+export const ORDER_STATUS = {
+  PENDING: "PENDING",
+  CONFIRMED: "CONFIRMED",
+  PROCESSING: "PROCESSING",
+  PACKED: "PACKED",
+  SHIPPED: "SHIPPED",
+  OUT_FOR_DELIVERY: "OUT_FOR_DELIVERY",
+  DELIVERED: "DELIVERED",
+  CANCELLED: "CANCELLED",
+  RETURNED: "RETURNED",
+} as const;
+
+export const PAYMENT_STATUS = {
+  PENDING: "PENDING",
+  COMPLETED: "COMPLETED",
+  FAILED: "FAILED",
+  REFUNDED: "REFUNDED",
+} as const;
+
+export const PAYMENT_METHOD = {
+  BKASH: "BKASH",
+  CASH_ON_DELIVERY: "CASH_ON_DELIVERY",
+  CARD: "CARD",
+} as const;
+
+export const NOTIFICATION_TYPE = {
+  ORDER: "ORDER",
+  PAYMENT: "PAYMENT",
+  PROMOTION: "PROMOTION",
+  SYSTEM: "SYSTEM",
+  OTP: "OTP",
+} as const;
+
+// Allowed status transitions for orders
+export const ORDER_STATUS_TRANSITIONS: Record<string, string[]> = {
+  PENDING: ["CONFIRMED", "CANCELLED"],
+  CONFIRMED: ["PROCESSING", "CANCELLED"],
+  PROCESSING: ["PACKED", "CANCELLED"],
+  PACKED: ["SHIPPED"],
+  SHIPPED: ["OUT_FOR_DELIVERY"],
+  OUT_FOR_DELIVERY: ["DELIVERED"],
+  DELIVERED: ["RETURNED"],
+  CANCELLED: [],
+  RETURNED: [],
+};
+
+export const PAGINATION_OPTIONS = ["page", "limit", "sortBy", "sortOrder"];
