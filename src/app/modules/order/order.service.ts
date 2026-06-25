@@ -40,7 +40,6 @@ type CheckoutPayload = {
   cartItems?: CheckoutItem[];
   note?: string;
   couponCode?: string;
-  deliverySlot?: string;
   paymentMethod: string;
 };
 
@@ -424,7 +423,6 @@ const createOrder = async (
           userId: effectiveUserId,
           addressId,
           notes: payload.note,
-          deliverySlot: payload.deliverySlot,
           subtotal,
           discount,
           deliveryFee,
@@ -1147,8 +1145,7 @@ const generatePackingSlip = async (orderId: string) => {
           </div>
           <div class="meta-card">
             <h3 class="section-label">Order Details</h3>
-            <div class="item"><span class="key">Payment:</span> <span class="val">${order.paymentMethod.replace(/_/g, " ")}</span></div>
-            <div class="item"><span class="key">Slot:</span> <span class="val">${order.deliverySlot || "ASAP"}</span></div>
+            <div class="item"><span class="key">Note:</span> <span class="val">${order.notes || "N/A"}</span></div>
             <div class="item"><span class="key">Status:</span> <span class="val" style="color: var(--primary)">${order.status}</span></div>
             <div class="item"><span class="key">Customer Email:</span> <span class="val">${order.user.email}</span></div>
           </div>
@@ -1265,3 +1262,5 @@ export const OrderService = {
   generatePackingSlip,
   getInvoice,
 };
+
+// force restart

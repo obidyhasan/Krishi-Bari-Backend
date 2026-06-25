@@ -17,7 +17,6 @@ const createOrder = z.object({
     })).optional(),
     note: z.string().optional(),
     couponCode: z.string().optional(),
-    deliverySlot: z.string().optional(),
     paymentMethod: z.enum(["BKASH", "CASH_ON_DELIVERY", "CARD"]).default("CASH_ON_DELIVERY"),
   }).refine((data) => data.addressId || data.guest, {
     message: "Either addressId or guest details must be provided",

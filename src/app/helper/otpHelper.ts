@@ -3,7 +3,7 @@ import config from "../config";
 import { getRedis } from "../shared/redis";
 import { prisma } from "../shared/prisma";
 
-type OtpPurpose = "verify" | "reset" | "admin2fa";
+type OtpPurpose = "verify" | "reset" | "admin2fa" | "login";
 
 const generateOtp = (): string => {
   return crypto.randomInt(100000, 999999).toString();

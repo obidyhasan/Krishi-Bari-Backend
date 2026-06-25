@@ -261,7 +261,6 @@ model Order {
   notes             String?
   couponId          String?
   estimatedDelivery DateTime?
-  deliverySlot      String? // Same-day, Next-day, Scheduled
   paymentMethod     PaymentMethod
   paymentStatus     PaymentStatus @default(PENDING)
 

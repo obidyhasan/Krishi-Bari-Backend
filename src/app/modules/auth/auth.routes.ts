@@ -8,61 +8,35 @@ import { AuthValidation } from "./auth.validation";
 const router = Router();
 
 router.post(
-  "/register",
-  validateRequest(AuthValidation.register),
-  AuthController.register
+  "/request-login",
+  validateRequest(AuthValidation.requestLogin),
+  AuthController.requestLogin
 );
+
 router.post(
-  "/send-otp",
-  validateRequest(AuthValidation.sendOtp),
-  AuthController.sendOtp
+  "/verify-login",
+  validateRequest(AuthValidation.verifyLogin),
+  AuthController.verifyLogin
 );
-router.post(
-  "/verify-otp",
-  validateRequest(AuthValidation.verifyOtp),
-  AuthController.verifyOtp
-);
-router.post(
-  "/verify-email",
-  validateRequest(AuthValidation.verifyEmail),
-  AuthController.verifyEmail
-);
-router.post(
-  "/login",
-  validateRequest(AuthValidation.login),
-  AuthController.login
-);
+
 router.post(
   "/refresh-token",
   validateRequest(AuthValidation.refreshToken),
   AuthController.refreshToken
 );
+
 router.post(
   "/refresh",
   validateRequest(AuthValidation.refreshToken),
   AuthController.refreshToken
 );
-router.post(
-  "/forgot-password",
-  validateRequest(AuthValidation.forgotPassword),
-  AuthController.forgotPassword
-);
-router.post(
-  "/reset-password",
-  validateRequest(AuthValidation.resetPassword),
-  AuthController.resetPassword
-);
-router.post(
-  "/change-password",
-  auth(UserRole.CUSTOMER, UserRole.ADMIN, UserRole.SUPER_ADMIN),
-  validateRequest(AuthValidation.changePassword),
-  AuthController.changePassword
-);
+
 router.post(
   "/logout",
   auth(UserRole.CUSTOMER, UserRole.ADMIN, UserRole.SUPER_ADMIN),
   AuthController.logout
 );
+
 router.get(
   "/me",
   auth(UserRole.CUSTOMER, UserRole.ADMIN, UserRole.SUPER_ADMIN),
