@@ -17,7 +17,8 @@ import { AdminAuthRouter } from "../modules/admin/adminAuth.routes";
 import { AdminOrderRouter } from "../modules/order/adminOrder.routes";
 import { AdminProductRouter } from "../modules/product/adminProduct.routes";
 import { TrackingRouter } from "../modules/tracking/tracking.routes";
-
+import { AdminFaqRouter, FaqRouter } from "../modules/faq/faq.routes";
+import { ContactRouter } from "../modules/contact/contact.routes";
 
 import { SettingRouter } from "../modules/setting/setting.routes";
 import ipAllowlist from "../middlewares/ipAllowlist";
@@ -47,6 +48,9 @@ const moduleRouters = [
   { path: "/admin/orders", route: AdminOrderRouter },
   { path: "/admin/products", route: AdminProductRouter },
   { path: "/tracking", route: TrackingRouter },
+  { path: "/faqs", route: FaqRouter },
+  { path: "/admin/faqs", route: AdminFaqRouter },
+  { path: "/contact", route: ContactRouter },
 ];
 
 moduleRouters.forEach((route) => {

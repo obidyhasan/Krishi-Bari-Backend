@@ -36,6 +36,10 @@ export default {
     user: process.env.EMAIL_USER as string,
     pass: process.env.EMAIL_PASS as string,
     from: process.env.EMAIL_FROM || "Krishi Bari <noreply@krishibari.com>",
+    contactTo:
+      process.env.CONTACT_EMAIL ||
+      process.env.EMAIL_FROM ||
+      "support@krishibari.com",
   },
 
   bkash: {

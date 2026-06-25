@@ -41,10 +41,10 @@ async function main() {
   const hashedPassword = await bcrypt.hash("password123", 10);
 
   const adminUser = await prisma.user.upsert({
-    where: { email: "admin@krishibari.com" },
+    where: { email: "obidyhasan@gmail.com" },
     create: {
       name: "Admin User",
-      email: "admin@krishibari.com",
+      email: "obidyhasan@gmail.com",
       phone: "+8801711111111",
       password: hashedPassword,
       role: "ADMIN",
@@ -64,10 +64,10 @@ async function main() {
   });
 
   const superAdminUser = await prisma.user.upsert({
-    where: { email: "superadmin@krishibari.com" },
+    where: { email: "obidyhasannaim@gmail.com.com" },
     create: {
       name: "Super Admin",
-      email: "superadmin@krishibari.com",
+      email: "obidyhasannaim@gmail.com.com",
       phone: "+8801700000000",
       password: hashedPassword,
       role: "SUPER_ADMIN",
@@ -114,7 +114,7 @@ async function main() {
 
   // 2. Create Addresses
   console.log("Creating addresses...");
-  
+
   // IDs from geoSeed.ts
   const dhakaDivisionId = "6ec60ece-9563-5152-91db-d7e2df666a29";
   const dhakaDistrictId = "71669645-508c-56ba-bf5d-71cc670dd0ec";
